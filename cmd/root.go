@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -29,17 +30,20 @@ var RootCmd = &cobra.Command{
 	Use:   "komari-agent",
 	Short: "komari agent",
 	Long:  `komari agent`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		loadFromEnv() // 从环境变量加载配置，覆盖解析
 		if flags.ConfigFile != "" {
 			bytes, err := os.ReadFile(flags.ConfigFile)
 			if err != nil {
-				log.Fatalf("Failed to read config file: %v", err)
+				return fmt.Errorf("failed to read config file: %w", err)
 			}
 			err = json.Unmarshal(bytes, flags)
 			if err != nil {
-				log.Fatalf("Failed to parse config file: %v", err)
+				return fmt.Errorf("failed to parse config file: %w", err)
 			}
+		}
+		if flags.PreferIPVersion != "" && flags.PreferIPVersion != "4" && flags.PreferIPVersion != "6" {
+			return fmt.Errorf("invalid --prefer-ip-version value %q: expected 4 or 6", flags.PreferIPVersion)
 		}
 		// 捕获中止信号，优雅退出
 		stopCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -93,8 +97,7 @@ var RootCmd = &cobra.Command{
 		if flags.AutoDiscoveryKey != "" {
 			err := handleAutoDiscovery()
 			if err != nil {
-				log.Printf("Auto-discovery failed: %v", err)
-				os.Exit(1)
+				return fmt.Errorf("auto-discovery failed: %w", err)
 			}
 		}
 		diskList, err := monitoring.DiskList()
@@ -145,6 +148,7 @@ func Execute() {
 
 	if err := RootCmd.Execute(); err != nil {
 		log.Println(err)
+		os.Exit(1)
 	}
 }
 
@@ -157,7 +161,7 @@ func init() {
 	RootCmd.PersistentFlags().BoolVar(&flags.DisableAutoUpdate, "disable-auto-update", false, "Disable automatic updates")
 	RootCmd.PersistentFlags().BoolVar(&flags.DisableWebSsh, "disable-web-ssh", false, "Disable remote control(web ssh and rce)")
 	//RootCmd.PersistentFlags().BoolVar(&flags.MemoryModeAvailable, "memory-mode-available", false, "[deprecated]Report memory as available instead of used.")
-	RootCmd.PersistentFlags().Float64VarP(&flags.Interval, "interval", "i", 1.0, "Interval in seconds")
+	RootCmd.PersistentFlags().Float64VarP(&flags.Interval, "interval", "i", 3.0, "Interval in seconds")
 	RootCmd.PersistentFlags().BoolVarP(&flags.IgnoreUnsafeCert, "ignore-unsafe-cert", "u", false, "Ignore unsafe certificate errors")
 	RootCmd.PersistentFlags().IntVarP(&flags.MaxRetries, "max-retries", "r", 3, "Maximum number of retries")
 	RootCmd.PersistentFlags().IntVarP(&flags.ReconnectInterval, "reconnect-interval", "c", 5, "Reconnect interval in seconds")
@@ -166,8 +170,6 @@ func init() {
 	RootCmd.PersistentFlags().StringVar(&flags.ExcludeNics, "exclude-nics", "", "Comma-separated list of network interfaces to exclude")
 	RootCmd.PersistentFlags().StringVar(&flags.IncludeMountpoints, "include-mountpoint", "", "Semicolon-separated list of mount points to include for disk statistics")
 	RootCmd.PersistentFlags().IntVar(&flags.MonthRotate, "month-rotate", 0, "Month reset for network statistics (0 to disable)")
-	RootCmd.PersistentFlags().StringVar(&flags.CFAccessClientID, "cf-access-client-id", "", "Cloudflare Access Client ID")
-	RootCmd.PersistentFlags().StringVar(&flags.CFAccessClientSecret, "cf-access-client-secret", "", "Cloudflare Access Client Secret")
 	RootCmd.PersistentFlags().BoolVar(&flags.MemoryIncludeCache, "memory-include-cache", false, "Include cache/buffer in memory usage")
 	RootCmd.PersistentFlags().BoolVar(&flags.MemoryReportRawUsed, "memory-exclude-bcf", false, "Use \"raminfo.Used = v.Total - v.Free - v.Buffers - v.Cached\" calculation for memory usage")
 	RootCmd.PersistentFlags().StringVar(&flags.CustomDNS, "custom-dns", "", "Custom DNS server to use (e.g. 8.8.8.8, 114.114.114.114). By default, the program uses the system DNS resolver.")
@@ -177,6 +179,8 @@ func init() {
 	RootCmd.PersistentFlags().StringVar(&flags.CustomIpv6, "custom-ipv6", "", "Custom IPv6 address to use")
 	RootCmd.PersistentFlags().BoolVar(&flags.GetIpAddrFromNic, "get-ip-addr-from-nic", false, "Get IP address from network interface")
 	RootCmd.PersistentFlags().StringVar(&flags.ConfigFile, "config", "", "Path to the configuration file")
+	RootCmd.PersistentFlags().BoolVar(&flags.DisableCompression, "disable-compression", false, "Disable v2 gzip/permessage-deflate compression")
+	RootCmd.PersistentFlags().StringVar(&flags.PreferIPVersion, "prefer-ip-version", "", "Prefer IP version for dashboard connections: 4 or 6")
 	RootCmd.PersistentFlags().ParseErrorsWhitelist.UnknownFlags = true
 }
 
